@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include<string.h>
 
 //SDK Header
 #include "app/framework/include/af.h"
@@ -11,6 +12,7 @@
 #define SSI_DEFAULT_FRAME_SIZE   (3)
 #define SSI_MAX_PAYLOAD_SIZE     (7)
 #define SSI_READ_PAYLOAD_SIZE    (4)
+#define SSI_REPLY_PAYLOAD_SIZE   (3)
 #define SSI_WRITE_PAYLOAD_SIZE   (7)
 
 #define CMD_CLEAR_ADDRESS            (0xA0)
@@ -28,18 +30,24 @@ enum sy7t609_reply_code {
     REPLY_BUFFER_OVERFLOW         = 0xBF
 };
 
-typedef struct ssi_packet_frame {
+typedef struct ssi_command_packet_frame {
     uint8_t header;
     uint8_t byte_count;
     uint8_t payload[SSI_MAX_PAYLOAD_SIZE];
     uint8_t checksum;
-} ssi_packet_frame_t;
+} ssi_command_packet_frame_t;
 
-static uint8_t getChecksum(uint8_t &data);
+typedef struct ssi_reply_packet_frame {
+    uint8_t reply_code;
+    uint8_t payload[SSI_REPLY_PAYLOAD_SIZE];
+    uint8_t checksum;
+} ssi_reply_packet_frame_t;
+
+static uint8_t getChecksumForCommand(ssi_command_packet_frame_t packet);
 bool readRegister(uint16_t addr, uint32_t* value);
 bool writeRegister(uint16_t addr, uint32_t* value);
 
-static uint8_t getChecksum(ssi_packet_frame_t packet)
+static uint8_t getChecksumForCommand(ssi_command_packet_frame_t packet)
 {
     uint8_t data;
     uint8_t checksum = 0;
@@ -62,9 +70,29 @@ static uint8_t getChecksum(ssi_packet_frame_t packet)
     return checksum;
 }
 
-bool readRegitser(uint16_t addr, uint32_t* value)
+static uint8_t getChecksumForReply(ssi_reply_packet_frame_t packet)
 {
-    ssi_packet_frame_t packet;
+    uint8_t data;
+    uint8_t checksum = 0;
+
+    data = packet.reply_code;
+    checksum += data;
+
+    uint8_t i;
+    uint8_t len = SSI_REPLY_PAYLOAD_SIZE;
+    for (i = 0; i < len; i++) {
+        data = packet.payload[i];
+        checksum += data;
+    }
+
+    checksum = ~checksum + 1;
+
+    return checksum;
+}
+
+bool readRegitser(uint16_t addr, uint32_t* out_value)
+{
+    ssi_command_packet_frame_t packet;
     
     packet.header = SSI_HEADER;
     
@@ -75,7 +103,7 @@ bool readRegitser(uint16_t addr, uint32_t* value)
     packet.payload[2] = (addr >> 8) & 0xFF;
     packet.payload[3] = CMD_READ_REGITSTER_3BYTES;
 
-    packet.checksum = getChecksum(packet);
+    packet.checksum = getChecksumForCommand(packet);
 
     emberSerialFlushRx(SERIAL_PORT);
 
@@ -90,7 +118,7 @@ bool readRegitser(uint16_t addr, uint32_t* value)
     emberSerialWriteByte(SERIAL_PORT, packet.checksum);
 
     uint16_t reply_len = 0;
-    uint8_t reply[6];
+    uint8_t reply_buffer[6];
     emberSerialReadDataTimeout(SERIAL_PORT, reply, 6, &reply_len, 50, 10);
 
     if (reply_len != 6) {
@@ -98,30 +126,29 @@ bool readRegitser(uint16_t addr, uint32_t* value)
         return false;
     }
 
-    if (reply[0] != REPLY_ACK_WITH_DATA) {
+    if (reply_buffer[0] != REPLY_ACK_WITH_DATA) {
         //SSI Error
         return false;
     }
 
-    uint8_t checksum = 0;
-    for (i = 0; i < 5; i++) {
-        checksum += reply[i];
-    }
+    ssi_reply_packet_frame_t reply_packet;
+    memcpy(&reply_packet, reply_buffer, 6);
+    
+    checksum = getChecksumForReply(reply_packet);
 
-    checksum = ~checksum + 1;
-
-    if (reply[5] ! = checksum) {
+    if (reply_packet.checksum ! = checksum) {
         //Checksum Error
         retrun false;
     }
-    *value = ((int32u)reply[4]<<16) | ((int32u)reply[3]<<8) | (int32u)reply[2];
+
+    *out_value = ((uint32_t)reply_packet.payload[2]<<16) | ((uint32_t)reply_packet.payload[1]<<8) | (uint32_t)reply_packet.payload[0];
 
     return true;
 }
 
 bool writeRegister(uint16_t addr, uint32_t value)
 {
-    ssi_packet_frame_t packet;
+    ssi_command_packet_frame_t packet;
     
     packet.header = SSI_HEADER;
 
@@ -135,7 +162,7 @@ bool writeRegister(uint16_t addr, uint32_t value)
     packet.payload[5] = (value >> 8) & 0xFF;
     packet.payload[6] = (value >> 16) & 0xFF;
 
-    packet.checksum = getChecksum(packet);
+    packet.checksum = getChecksumForCommand(packet);
 
     emberSerialFlushRx(SERIAL_PORT);
 
