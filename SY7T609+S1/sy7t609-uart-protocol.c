@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include<string.h>
+#include <string.h>
 
 //SDK Header
 #include "app/framework/include/af.h"

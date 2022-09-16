@@ -37,12 +37,12 @@
 *
 * Write Command
 * # Case1 #
-* |              PAYLOAD              |    
+* |              PAYLOAD              |
 * |   0xD3    |        Data           |
 * |  Command  | (Number of Bytes = 3) |
 *
 * # Case2 #
-* |                     PAYLOAD                    |    
+* |                     PAYLOAD                    |
 * |   0xD0    |                 Data               |
 * |  Command  | (Number of Bytes = Byte Count - 4) |
 * Case1) To read 0 to 15 bytes, the command byte is completed with
